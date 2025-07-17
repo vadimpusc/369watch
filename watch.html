@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Watch Film</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <style>
+    body { font-family:sans-serif; max-width:720px; margin:2rem auto; }
+    button { margin: .5rem; padding:.75rem 1.5rem; font-size:1rem; }
+    #player { margin-top:2rem; }
+  </style>
+</head>
+<body>
+  <h1 id="film-title">Loading…</h1>
+  <div id="film-description"></div>
+  <div id="buttons" style="margin-top:1rem;"></div>
+  <div id="player">After purchase, your film will appear here.</div>
+
+  <script>
+  (async function(){
+    const params  = new URLSearchParams(location.search);
+    const slug    = params.get('slug');
+    const sessId  = params.get('session_id');
+    const apiRoot = 'https://yourdomain.com/wp-json/film/v1';
+    if (!slug) {
+      document.body.innerText = 'No film specified.';
+      return;
+    }
+
+    // 1) Load film metadata
+    let film;
+    try {
+      const res = await fetch(`${apiRoot}/film-data?slug=${encodeURIComponent(slug)}`);
+      film = await res.json();
+      if (film.code) throw film;
+    } catch(err) {
+      console.error(err);
+      document.getElementById('film-title').innerText = 'Error loading film info.';
+      return;
+    }
+
+    // 2) Render title & description
+    document.getElementById('film-title').innerText       = film.title;
+    document.getElementById('film-description').innerHTML = film.description;
+
+    // 3) Render buttons
+    const btnWrap = document.getElementById('buttons');
+    ['rent','buy'].forEach(type => {
+      const price   = type==='rent'? film.rent_price : film.buy_price;
+      const label   = type==='rent'? 'Rent' : 'Buy';
+      const btn     = document.createElement('button');
+      btn.innerText = `${label} £${(price/100).toFixed(2)}`;
+      btn.onclick   = () => createCheckout(type);
+      btnWrap.appendChild(btn);
+    });
+
+    // 4) Create Stripe Checkout
+    async function createCheckout(type) {
+      try {
+        const res = await fetch(`${apiRoot}/checkout`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({slug,type})
+        });
+        const { sessionId } = await res.json();
+        if (!sessionId) throw new Error('No sessionId');
+        window.location = `https://checkout.stripe.com/pay/${sessionId}`;
+      } catch(err) {
+        console.error(err);
+        alert('Failed to start checkout.');
+      }
+    }
+
+    // 5) If returning with session_id, fetch Bunny token & play
+    if (sessId) {
+      try {
+        const res = await fetch(`${apiRoot}/token`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({slug, session_id: sessId})
+        });
+        const { url } = await res.json();
+        if (!url) throw new Error('No URL returned');
+        renderPlayer(url);
+      } catch(err) {
+        console.error(err);
+        document.getElementById('player').innerText = 'Unable to load video.';
+      }
+    }
+
+    // 6) HLS player
+    function renderPlayer(hlsUrl) {
+      const c = document.getElementById('player');
+      c.innerHTML = '';
+      if (window.Hls && Hls.isSupported()) {
+        const video = document.createElement('video');
+        video.controls = true; video.style.maxWidth = '100%';
+        c.appendChild(video);
+        const hls = new Hls();
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(video);
+      } else {
+        c.innerHTML = `<video controls style="max-width:100%">
+                         <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
+                         Your browser doesn’t support HLS.
+                       </video>`;
+      }
+    }
+  })();
+  </script>
+</body>
+</html>

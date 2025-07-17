@@ -1,81 +1,107 @@
-<!doctype html><html><head>
-  <meta charset="utf-8"><title>Watch Film</title>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Watch Film</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-  <style>/* your CSS */</style>
-</head><body>
+  <style>
+    body { font-family:sans-serif; max-width:720px; margin:2rem auto; }
+    button.rent-now {
+      background:#0073aa; color:#fff; border:none;
+      border-radius:.25rem; padding:.75rem 1.5rem;
+      font-size:1rem; cursor:pointer;
+    }
+  </style>
+</head>
+<body>
   <h1 id="film-title">Loading…</h1>
   <div id="description"></div>
   <div id="buttons"></div>
   <div id="player">After renting, your film will appear here.</div>
+
   <script>
   (async()=>{
-    const params = new URLSearchParams(location.search);
-    const slug   = params.get('slug');
+    const params     = new URLSearchParams(location.search);
+    const slug       = params.get('slug');
     const session_id = params.get('session_id');
-    const apiOrigin = 'https://sanrokuku.com/wp-json/film/v1';
+    const apiOrigin  = 'https://sanrokuku.com/wp-json/film/v1';
 
-    if(!slug) {
+    if (!slug) {
       document.body.innerText = 'No film specified.';
       return;
     }
 
-    // 1) Fetch metadata
+    // 1) Metadata
     let film;
     try {
       const r = await fetch(`${apiOrigin}/film-data?slug=${slug}`);
       film = await r.json();
-      if(film.code) throw film;
-    } catch(err) {
+      if (film.code) throw film;
+    } catch(e) {
+      console.error('film-data error',e);
       document.getElementById('film-title').innerText = 'Error loading film info.';
       return;
     }
 
-    // 2) Render title & desc
-    document.getElementById('film-title').innerText = film.title;
+    // 2) Render info + Rent button
+    document.getElementById('film-title').innerText   = film.title;
     document.getElementById('description').innerHTML = film.description;
-
-    // 3) Render Rent button
     const btn = document.createElement('button');
-    btn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
-    btn.onclick = ()=> startCheckout(slug);
+    btn.className = 'rent-now';
+    btn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
+    btn.onclick   = ()=> startCheckout(slug);
     document.getElementById('buttons').appendChild(btn);
 
-    // 4) Start Stripe Checkout
+    // 3) Checkout
     async function startCheckout(slug) {
-      const res = await fetch(`${apiOrigin}/checkout`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({slug})
-      });
-      const { sessionId } = await res.json();
-      window.location = `https://checkout.stripe.com/pay/${sessionId}`;
+      try {
+        const res  = await fetch(`${apiOrigin}/checkout`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({slug})
+        });
+        console.log('checkout status',res.status);
+        const data = await res.json();
+        console.log('checkout data',data);
+        if (!data.sessionId) throw data;
+        window.location = `https://checkout.stripe.com/pay/${data.sessionId}`;
+      } catch(err) {
+        console.error('startCheckout error',err);
+        alert('Error starting checkout; see console.');
+      }
     }
 
-    // 5) On return, fetch Bunny token
-    if(session_id) {
+    // 4) On return, token
+    if (session_id) {
       try {
-        const r = await fetch(`${apiOrigin}/token`, {
+        const res  = await fetch(`${apiOrigin}/token`, {
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify({session_id})
         });
-        const { url } = await r.json();
-        renderPlayer(url);
-      } catch(e) {
+        console.log('token status',res.status);
+        const json = await res.json();
+        console.log('token data',json);
+        if (!json.url) throw json;
+        renderPlayer(json.url);
+      } catch(err) {
+        console.error('token error',err);
         document.getElementById('player').innerText = 'Unable to load video.';
       }
     }
 
-    // 6) HLS.js player
+    // 5) HLS.js player
     function renderPlayer(hlsUrl) {
       const c = document.getElementById('player');
       c.innerHTML = '';
-      if(window.Hls && Hls.isSupported()){
+      if (window.Hls && Hls.isSupported()) {
         const v = document.createElement('video');
         v.controls=true; v.style.maxWidth='100%';
         c.appendChild(v);
-        const hls = new Hls(); hls.loadSource(hlsUrl); hls.attachMedia(v);
+        const hls = new Hls();
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(v);
       } else {
         c.innerHTML = `<video controls style="max-width:100%">
           <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
@@ -85,4 +111,5 @@
     }
   })();
   </script>
-</body></html>
+</body>
+</html>

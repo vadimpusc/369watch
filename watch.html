@@ -1,4 +1,5 @@
-<!doctype html><html>
+<!doctype html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>Watch Film</title>
@@ -17,24 +18,22 @@
 
   <script>
   (async()=>{
-    const params    = new URLSearchParams(location.search);
-    const slug      = params.get('slug');
-    const session_id= params.get('session_id');
-    const apiOrigin = 'https://sanrokuku.com/wp-json/film/v1';
-    // redirect back to this page after login
-    const loginUrl  = 'https://sanrokuku.com/poko?redirect_to=' 
-                    + encodeURIComponent(window.location.href);
+    const params     = new URLSearchParams(location.search);
+    const slug       = params.get('slug');
+    const session_id = params.get('session_id');
+    const apiOrigin  = 'https://sanrokuku.com/wp-json/film/v1';
+    const wpMovieUrl = `https://sanrokuku.com/movie/${slug}/`;
 
     if (!slug) {
       document.body.innerText = 'No film specified.';
       return;
     }
 
-    // 1) Fetch metadata
+    // 1) Fetch the film metadata
     let film;
     try {
-      const r = await fetch(`${apiOrigin}/film-data?slug=${slug}`);
-      film = await r.json();
+      const res = await fetch(`${apiOrigin}/film-data?slug=${slug}`);
+      film = await res.json();
       if (film.code) throw film;
     } catch {
       document.getElementById('film-title').innerText = 'Error loading film info.';
@@ -45,83 +44,53 @@
     document.getElementById('film-title').innerText   = film.title;
     document.getElementById('description').innerHTML = film.description;
 
-    // 3) Are we logged in? (via WP cookie)
-    let loggedIn = false;
-    try {
-      const me = await fetch('https://sanrokuku.com/wp-json/wp/v2/users/me', {
-        credentials: 'include'
-      });
-      if (me.ok) loggedIn = true;
-    } catch(e){}
-
     const buttons = document.getElementById('buttons');
-    if (!loggedIn) {
-      // show just one button
+
+    // 3) If no session_id → this user hasn’t rented yet
+    if (!session_id) {
       buttons.innerHTML = `
-        <a class="btn" href="${loginUrl}">
-          Log In / Register to Rent
+        <a class="btn" href="${wpMovieUrl}">
+          → Rent this film on Sanrokuku.com
         </a>`;
       return;
     }
 
-    // 4) Show Rent button
-    const rentBtn = document.createElement('a');
-    rentBtn.className = 'btn';
-    rentBtn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
-    rentBtn.href      = '#';
-    rentBtn.onclick   = () => startCheckout(slug);
-    buttons.appendChild(rentBtn);
-
-    // 5) Trigger Stripe Checkout
-    async function startCheckout(slug) {
-      try {
-        const res = await fetch(`${apiOrigin}/checkout`, {
-          method:      'POST',
-          credentials: 'include',
-          headers:     {'Content-Type':'application/json'},
-          body:        JSON.stringify({slug})
-        });
-        if (!res.ok) throw await res.json();
-        const { url } = await res.json();
-        window.location = url;
-      } catch(err) {
-        console.error(err);
-        alert('Error starting checkout; see console.');
-      }
+    // 4) Otherwise they’ve returned from Stripe with a session_id
+    //    So fetch the Bunny URL and play it.
+    try {
+      const r = await fetch(`${apiOrigin}/token`, {
+        method:      'POST',
+        credentials: 'include',
+        headers:     {'Content-Type':'application/json'},
+        body:        JSON.stringify({session_id})
+      });
+      if (!r.ok) throw await r.json();
+      const { url } = await r.json();
+      renderPlayer(url);
+    } catch (err) {
+      console.error(err);
+      document.getElementById('player').innerText = 'Unable to load video.';
     }
 
-    // 6) After Stripe, load Bunny token & play
-    if (session_id) {
-      try {
-        const r = await fetch(`${apiOrigin}/token`, {
-          method:      'POST',
-          credentials: 'include',
-          headers:     {'Content-Type':'application/json'},
-          body:        JSON.stringify({session_id})
-        });
-        if (!r.ok) throw await r.json();
-        const { url } = await r.json();
-        renderPlayer(url);
-      } catch(e) {
-        console.error(e);
-        document.getElementById('player').innerText = 'Unable to load video.';
-      }
-    }
-
-    // 7) HLS.js
+    // 5) HLS.js player
     function renderPlayer(hlsUrl) {
-      const c = document.getElementById('player');
-      c.innerHTML = '';
+      const container = document.getElementById('player');
+      container.innerHTML = '';
       if (window.Hls && Hls.isSupported()) {
-        const v = document.createElement('video');
-        v.crossOrigin='anonymous'; v.controls=true; v.style.maxWidth='100%';
-        c.appendChild(v);
-        const hls = new Hls(); hls.loadSource(hlsUrl); hls.attachMedia(v);
+        const video = document.createElement('video');
+        video.crossOrigin = 'anonymous';
+        video.controls     = true;
+        video.style.maxWidth = '100%';
+        container.appendChild(video);
+        const hls = new Hls();
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(video);
       } else {
-        c.innerHTML = `<video controls crossOrigin="anonymous" style="max-width:100%">
-          <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
-          Your browser doesn’t support HLS.
-        </video>`;
+        container.innerHTML = `
+          <video controls crossOrigin="anonymous" style="max-width:100%">
+            <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
+            Your browser doesn’t support HLS.
+          </video>`;
       }
     }
   })();

@@ -27,7 +27,7 @@
     const slug      = params.get('slug');
     const session_id= params.get('session_id');
     const apiOrigin = 'https://sanrokuku.com/wp-json/film/v1';
-    const loginUrl  = 'https://sanrokuku.com/wp-login.php?redirect_to=' + encodeURIComponent(location.href);
+    const loginUrl  = 'https://sanrokuku.com/poko?redirect_to=' + encodeURIComponent(location.href);
 
     if (!slug) {
       return document.body.innerText = 'No film specified.';

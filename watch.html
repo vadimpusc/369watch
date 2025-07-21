@@ -4,8 +4,12 @@
   <meta charset="utf-8">
   <title>Watch Film</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <!-- only load HLS.js -->
+
+  <!-- 1) Include HLS.js for video playback -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <!-- 2) Include Stripe.js so we can redirect -->
+  <script src="https://js.stripe.com/v3/"></script>
+
   <style>
     body { font-family:sans-serif; max-width:720px; margin:2rem auto; padding:0 1rem; }
     h1 { font-size:1.75rem; margin-bottom:.5rem; }
@@ -36,14 +40,17 @@
       return;
     }
 
-    // 1) Fetch metadata
+    // Initialize Stripe with your publishable key
+    const stripe = Stripe('pk_live_51PlABPGgJBIMHpyhWtFe0SrZS5rknpJMMdWmfKtsx1LYsLPlWzpsWECTkK4mkve6wnbp0pRNZTFQpv7EaThRAyUk00nvgdzkUd');
+
+    // 1) Fetch film metadata
     let film;
     try {
       const r = await fetch(`${apiOrigin}/film-data?slug=${slug}`);
       film = await r.json();
       if (film.code) throw film;
     } catch (err) {
-      console.error(err);
+      console.error('film-data error', err);
       document.getElementById('film-title').innerText = 'Error loading film info.';
       return;
     }
@@ -52,31 +59,32 @@
     document.getElementById('film-title').innerText   = film.title;
     document.getElementById('description').innerHTML = film.description;
 
-    // 3) Create Rent button
+    // 3) Render Rent button
     const btn = document.createElement('button');
     btn.className = 'rent-now';
     btn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
-    btn.onclick   = () => startCheckout(slug);
+    btn.onclick   = ()=> startCheckout(slug);
     document.getElementById('buttons').appendChild(btn);
 
-    // 4) Redirect into Stripe Checkout
+    // 4) Use Stripe.js to redirect to Checkout
     async function startCheckout(slug) {
       try {
         const res = await fetch(`${apiOrigin}/checkout`, {
           method:      'POST',
           credentials: 'include',
-          headers:     { 'Content-Type':'application/json' },
-          body:        JSON.stringify({ slug })
+          headers:     {'Content-Type':'application/json'},
+          body:        JSON.stringify({slug})
         });
         if (!res.ok) {
           const e = await res.json().catch(()=>({message:res.statusText}));
           throw new Error(e.message);
         }
         const { sessionId } = await res.json();
-        // **This** triggers the browser to go to the hosted Checkout page
-        window.location.href = `https://checkout.stripe.com/pay/${sessionId}`;
+        // Proper Stripe.js redirect
+        const { error } = await stripe.redirectToCheckout({ sessionId });
+        if (error) throw error;
       } catch (err) {
-        console.error(err);
+        console.error('startCheckout error', err);
         alert('Error starting checkout; see console.');
       }
     }
@@ -87,14 +95,14 @@
         const r = await fetch(`${apiOrigin}/token`, {
           method:      'POST',
           credentials: 'include',
-          headers:     { 'Content-Type':'application/json' },
-          body:        JSON.stringify({ session_id })
+          headers:     {'Content-Type':'application/json'},
+          body:        JSON.stringify({session_id})
         });
         if (!r.ok) throw await r.json();
         const { url } = await r.json();
         renderPlayer(url);
       } catch (e) {
-        console.error(e);
+        console.error('token error', e);
         document.getElementById('player').innerText = 'Unable to load video.';
       }
     }

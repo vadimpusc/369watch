@@ -6,11 +6,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
-    body { font-family:sans-serif; max-width:720px; margin:2rem auto; }
+    body { font-family: sans-serif; max-width: 720px; margin: 2rem auto; }
     button.rent-now {
-      background:#0073aa; color:#fff; border:none;
-      border-radius:.25rem; padding:.75rem 1.5rem;
-      font-size:1rem; cursor:pointer;
+      background: #0073aa;
+      color: #fff;
+      border: none;
+      border-radius: .25rem;
+      padding: .75rem 1.5rem;
+      font-size: 1rem;
+      cursor: pointer;
     }
   </style>
 </head>
@@ -21,7 +25,7 @@
   <div id="player">After renting, your film will appear here.</div>
 
   <script>
-  (async()=>{
+  (async () => {
     const params     = new URLSearchParams(location.search);
     const slug       = params.get('slug');
     const session_id = params.get('session_id');
@@ -32,81 +36,89 @@
       return;
     }
 
-    // 1) Metadata
+    // 1) Fetch film metadata
     let film;
     try {
-      const r = await fetch(`${apiOrigin}/film-data?slug=${slug}`);
-      film = await r.json();
+      const res = await fetch(`${apiOrigin}/film-data?slug=${slug}`);
+      film = await res.json();
       if (film.code) throw film;
-    } catch(e) {
-      console.error('film-data error',e);
+    } catch (err) {
+      console.error('● film-data error:', err);
       document.getElementById('film-title').innerText = 'Error loading film info.';
       return;
     }
 
-    // 2) Render info + Rent button
+    // 2) Render title & description
     document.getElementById('film-title').innerText   = film.title;
     document.getElementById('description').innerHTML = film.description;
+
+    // 3) Render Rent button
     const btn = document.createElement('button');
     btn.className = 'rent-now';
-    btn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
-    btn.onclick   = ()=> startCheckout(slug);
+    btn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
+    btn.onclick   = () => startCheckout(slug);
     document.getElementById('buttons').appendChild(btn);
 
-    // 3) Start Stripe Checkout
+    // 4) startCheckout with detailed logs
     async function startCheckout(slug) {
       try {
-        const res  = await fetch(`${apiOrigin}/checkout`, {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({slug})
+        const res = await fetch(`${apiOrigin}/checkout`, {
+          method: 'POST',
+          credentials: 'include', 
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({ slug })
         });
-        console.log('checkout status',res.status);
-        const data = await res.json();
-        console.log('checkout data',data);
-        if (!data.sessionId) throw data;
+        console.log('🛠️ checkout status:', res.status, res.statusText);
+        const data = await res.json().catch(e => { throw new Error('Invalid JSON') });
+        console.log('🛠️ checkout response:', data);
+        if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
+        if (!data.sessionId) throw new Error('No sessionId returned');
         window.location = `https://checkout.stripe.com/pay/${data.sessionId}`;
-      } catch(err) {
-        console.error('startCheckout error',err);
-        alert('Error starting checkout; see console.');
+      } catch (err) {
+        console.error('⚠️ startCheckout error:', err);
+        alert('Error starting checkout; see console for details.');
       }
     }
 
-    // 4) Fetch Bunny token after return
+    // 5) On return, fetch Bunny token
     if (session_id) {
       try {
-        const res  = await fetch(`${apiOrigin}/token`, {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({session_id})
+        const res = await fetch(`${apiOrigin}/token`, {
+          method:      'POST',
+          credentials: 'include',
+          headers:     { 'Content-Type':'application/json' },
+          body:        JSON.stringify({ session_id })
         });
-        console.log('token status',res.status);
-        const json = await res.json();
-        console.log('token data',json);
-        if (!json.url) throw json;
+        console.log('🛠️ token status:', res.status, res.statusText);
+        const json = await res.json().catch(e => { throw new Error('Invalid JSON') });
+        console.log('🛠️ token response:', json);
+        if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
+        if (!json.url) throw new Error('No url in token response');
         renderPlayer(json.url);
-      } catch(err) {
-        console.error('token error',err);
+      } catch (err) {
+        console.error('⚠️ token error:', err);
         document.getElementById('player').innerText = 'Unable to load video.';
       }
     }
 
-    // 5) HLS.js player
+    // 6) HLS.js player
     function renderPlayer(hlsUrl) {
       const c = document.getElementById('player');
       c.innerHTML = '';
       if (window.Hls && Hls.isSupported()) {
-        const v = document.createElement('video');
-        v.controls=true; v.style.maxWidth='100%';
+        const v   = document.createElement('video');
+        v.controls = true;
+        v.style.maxWidth = '100%';
         c.appendChild(v);
         const hls = new Hls();
         hls.loadSource(hlsUrl);
         hls.attachMedia(v);
       } else {
-        c.innerHTML = `<video controls style="max-width:100%">
-          <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
-          Your browser doesn’t support HLS.
-        </video>`;
+        c.innerHTML = `
+          <video controls style="max-width:100%">
+            <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
+            Your browser doesn’t support HLS.
+          </video>`;
       }
     }
   })();

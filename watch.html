@@ -4,10 +4,18 @@
   <meta charset="utf-8">
   <title>Watch Film</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <!-- ONLY load HLS.js here -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
-    body { font-family:sans-serif; max-width:720px; margin:2rem auto; }
-    .rent-now { /* your button styles */ }
+    body { font-family:sans-serif; max-width:720px; margin:2rem auto; padding:0 1rem; }
+    h1 { font-size:1.75rem; margin-bottom:.5rem; }
+    #buttons { margin:1.5rem 0; }
+    .rent-now {
+      background:#0073aa; color:#fff; border:none;
+      border-radius:.25rem; padding:.75rem 1.5rem;
+      font-size:1rem; cursor:pointer;
+    }
+    #player { margin-top:2rem; }
   </style>
 </head>
 <body>
@@ -17,7 +25,7 @@
   <div id="player">After renting, your film will appear here.</div>
 
   <script>
-  (async () => {
+  (async()=>{
     const params     = new URLSearchParams(location.search);
     const slug       = params.get('slug');
     const session_id = params.get('session_id');
@@ -28,30 +36,30 @@
       return;
     }
 
-    // Fetch film data
+    // 1) Fetch film metadata
     let film;
     try {
       const r = await fetch(`${apiOrigin}/film-data?slug=${slug}`);
       film = await r.json();
       if (film.code) throw film;
-    } catch (e) {
-      document.getElementById('film-title').innerText = 'Error loading film.';
-      console.error(e);
+    } catch (err) {
+      console.error('film-data error', err);
+      document.getElementById('film-title').innerText = 'Error loading film info.';
       return;
     }
 
-    // Show info
+    // 2) Render title & description
     document.getElementById('film-title').innerText   = film.title;
     document.getElementById('description').innerHTML = film.description;
 
-    // Rent button
+    // 3) Render Rent button
     const btn = document.createElement('button');
     btn.className = 'rent-now';
     btn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
-    btn.onclick   = () => startCheckout(slug);
+    btn.onclick   = ()=> startCheckout(slug);
     document.getElementById('buttons').appendChild(btn);
 
-    // Native redirect into Stripe Checkout
+    // 4) Native redirect into Stripe Checkout (no Stripe.js here)
     async function startCheckout(slug) {
       try {
         const res = await fetch(`${apiOrigin}/checkout`, {
@@ -61,19 +69,19 @@
           body:        JSON.stringify({slug})
         });
         if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.message || res.statusText);
+          const e = await res.json().catch(()=>({message:res.statusText}));
+          throw new Error(e.message);
         }
         const { sessionId } = await res.json();
-        // **THIS** is the only time we point the browser at Stripe
+        // **THIS** does the full‑page redirect to Stripe
         window.location = `https://checkout.stripe.com/pay/${sessionId}`;
       } catch (err) {
+        console.error('startCheckout error', err);
         alert('Error starting checkout; see console.');
-        console.error(err);
       }
     }
 
-    // Bunny playback (unchanged)
+    // 5) After successful payment, load Bunny token & render player
     if (session_id) {
       try {
         const r = await fetch(`${apiOrigin}/token`, {
@@ -86,11 +94,12 @@
         const { url } = await r.json();
         renderPlayer(url);
       } catch (e) {
-        console.error(e);
+        console.error('token error', e);
         document.getElementById('player').innerText = 'Unable to load video.';
       }
     }
 
+    // 6) HLS.js player
     function renderPlayer(hlsUrl) {
       const c = document.getElementById('player');
       c.innerHTML = '';

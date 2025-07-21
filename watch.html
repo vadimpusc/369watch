@@ -1,125 +1,124 @@
-<!doctype html>
-<html lang="en">
+<!doctype html><html>
 <head>
   <meta charset="utf-8">
   <title>Watch Film</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
-    body{font-family:sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem}
-    .btn{display:inline-block;padding:.75rem 1.5rem;background:#0073aa;color:#fff;border:none;border-radius:.25rem;cursor:pointer;text-decoration:none;}
+    body { font-family:sans-serif; max-width:720px; margin:2rem auto; padding:0 1rem; }
+    .btn  { display:inline-block; padding:.75rem 1.5rem; background:#0073aa; color:#fff; text-decoration:none; border-radius:.25rem; }
   </style>
 </head>
 <body>
   <h1 id="film-title">Loading…</h1>
   <div id="description"></div>
-  <div id="auth"></div>
-  <div id="buttons"></div>
+  <div id="buttons" style="margin:1.5rem 0;"></div>
   <div id="player">After renting, your film will appear here.</div>
 
   <script>
   (async()=>{
-    const API = 'https://sanrokuku.com/wp-json/film/v1';
-    const params = new URLSearchParams(location.search);
-    const slug = params.get('slug');
-    const session_id = params.get('session_id');
-    if (!slug) return document.body.innerText='No film specified.';
+    const params    = new URLSearchParams(location.search);
+    const slug      = params.get('slug');
+    const session_id= params.get('session_id');
+    const apiOrigin = 'https://sanrokuku.com/wp-json/film/v1';
+    // redirect back to this page after login
+    const loginUrl  = 'https://sanrokuku.com/poko?redirect_to=' 
+                    + encodeURIComponent(window.location.href);
 
-    // JWT stored here:
-    let token = localStorage.getItem('srk_jwt')||'';
-    let expires = +localStorage.getItem('srk_jwt_exp')||0;
-
-    // 1) If no token or expired, show login form
-    if (!token || expires < Date.now()/1000) {
-      document.getElementById('auth').innerHTML=`
-        <form id="loginForm">
-          <input name="username" placeholder="Username" required>
-          <input name="password" type="password" placeholder="Password" required>
-          <button class="btn">Log In</button>
-        </form>`;
-      document.getElementById('loginForm').onsubmit = async e => {
-        e.preventDefault();
-        const f = e.target;
-        const res = await fetch(API+'/login',{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({username:f.username.value,password:f.password.value})
-        });
-        if (!res.ok) {
-          alert('Login failed'); return;
-        }
-        const {token:jwt,expires:exp} = await res.json();
-        localStorage.setItem('srk_jwt',jwt);
-        localStorage.setItem('srk_jwt_exp',exp);
-        location.reload();
-      };
+    if (!slug) {
+      document.body.innerText = 'No film specified.';
       return;
     }
 
-    // 2) Fetch film metadata
-    const md = await fetch(API+`/film-data?slug=${slug}`);
-    const film = await md.json();
-    if (film.code) {
-      document.getElementById('film-title').innerText='Error loading film.';
+    // 1) Fetch metadata
+    let film;
+    try {
+      const r = await fetch(`${apiOrigin}/film-data?slug=${slug}`);
+      film = await r.json();
+      if (film.code) throw film;
+    } catch {
+      document.getElementById('film-title').innerText = 'Error loading film info.';
       return;
     }
-    document.getElementById('film-title').innerText=film.title;
-    document.getElementById('description').innerHTML=film.description;
 
-    // 3) Rent button
-    const btn = document.createElement('button');
-    btn.className='btn';
-    btn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
-    btn.onclick = async ()=>{
+    // 2) Render title & description
+    document.getElementById('film-title').innerText   = film.title;
+    document.getElementById('description').innerHTML = film.description;
+
+    // 3) Are we logged in? (via WP cookie)
+    let loggedIn = false;
+    try {
+      const me = await fetch('https://sanrokuku.com/wp-json/wp/v2/users/me', {
+        credentials: 'include'
+      });
+      if (me.ok) loggedIn = true;
+    } catch(e){}
+
+    const buttons = document.getElementById('buttons');
+    if (!loggedIn) {
+      // show just one button
+      buttons.innerHTML = `
+        <a class="btn" href="${loginUrl}">
+          Log In / Register to Rent
+        </a>`;
+      return;
+    }
+
+    // 4) Show Rent button
+    const rentBtn = document.createElement('a');
+    rentBtn.className = 'btn';
+    rentBtn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
+    rentBtn.href      = '#';
+    rentBtn.onclick   = () => startCheckout(slug);
+    buttons.appendChild(rentBtn);
+
+    // 5) Trigger Stripe Checkout
+    async function startCheckout(slug) {
       try {
-        const res = await fetch(API+'/checkout',{
-          method:'POST',
-          headers:{
-            'Content-Type':'application/json',
-            'Authorization':'Bearer '+token
-          },
-          body:JSON.stringify({slug})
+        const res = await fetch(`${apiOrigin}/checkout`, {
+          method:      'POST',
+          credentials: 'include',
+          headers:     {'Content-Type':'application/json'},
+          body:        JSON.stringify({slug})
         });
         if (!res.ok) throw await res.json();
-        const {url} = await res.json();
-        window.location.href = url;
-      } catch(e){
-        console.error(e);
-        alert('Checkout error');
+        const { url } = await res.json();
+        window.location = url;
+      } catch(err) {
+        console.error(err);
+        alert('Error starting checkout; see console.');
       }
-    };
-    document.getElementById('buttons').appendChild(btn);
+    }
 
-    // 4) After return, play
+    // 6) After Stripe, load Bunny token & play
     if (session_id) {
       try {
-        const res = await fetch(API+'/token',{
-          method:'POST',
-          headers:{
-            'Content-Type':'application/json',
-            'Authorization':'Bearer '+token
-          },
-          body:JSON.stringify({session_id})
+        const r = await fetch(`${apiOrigin}/token`, {
+          method:      'POST',
+          credentials: 'include',
+          headers:     {'Content-Type':'application/json'},
+          body:        JSON.stringify({session_id})
         });
-        if (!res.ok) throw await res.json();
-        const {url} = await res.json();
+        if (!r.ok) throw await r.json();
+        const { url } = await r.json();
         renderPlayer(url);
-      } catch(e){
+      } catch(e) {
         console.error(e);
-        document.getElementById('player').innerText='Unable to load video.';
+        document.getElementById('player').innerText = 'Unable to load video.';
       }
     }
 
-    // HLS.js player
-    function renderPlayer(hlsUrl){
-      const c=document.getElementById('player'); c.innerHTML='';
-      if (window.Hls && Hls.isSupported()){
-        const v=document.createElement('video');
-        v.controls=true; v.crossOrigin='anonymous'; v.style.maxWidth='100%';
+    // 7) HLS.js
+    function renderPlayer(hlsUrl) {
+      const c = document.getElementById('player');
+      c.innerHTML = '';
+      if (window.Hls && Hls.isSupported()) {
+        const v = document.createElement('video');
+        v.crossOrigin='anonymous'; v.controls=true; v.style.maxWidth='100%';
         c.appendChild(v);
-        const hls=new Hls(); hls.loadSource(hlsUrl); hls.attachMedia(v);
+        const hls = new Hls(); hls.loadSource(hlsUrl); hls.attachMedia(v);
       } else {
-        c.innerHTML=`<video controls crossOrigin="anonymous" style="max-width:100%">
+        c.innerHTML = `<video controls crossOrigin="anonymous" style="max-width:100%">
           <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
           Your browser doesn’t support HLS.
         </video>`;

@@ -6,12 +6,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
-    body { font-family:sans-serif; max-width:720px; margin:2rem auto; padding:0 1rem }
-    button.rent-now {
+    body { font-family:sans-serif; max-width:720px; margin:2rem auto; padding:0 1rem; }
+    h1 { font-size:1.75rem; margin-bottom:.5rem; }
+    #buttons { margin:1.5rem 0; }
+    .rent-now {
       background:#0073aa; color:#fff; border:none;
       border-radius:.25rem; padding:.75rem 1.5rem;
       font-size:1rem; cursor:pointer;
     }
+    #player { margin-top:2rem; }
   </style>
 </head>
 <body>
@@ -22,36 +25,41 @@
 
   <script>
   (async()=>{
-    const params    = new URLSearchParams(location.search);
-    const slug      = params.get('slug');
-    const apiOrigin = 'https://sanrokuku.com/wp-json/film/v1';
+    const params     = new URLSearchParams(location.search);
+    const slug       = params.get('slug');
+    const session_id = params.get('session_id');
+    const apiOrigin  = 'https://sanrokuku.com/wp-json/film/v1';
 
     if (!slug) {
-      return document.body.innerText = 'No film specified.';
+      document.body.innerText = 'No film specified.';
+      return;
     }
 
-    // Fetch film info
+    // 1) Fetch film metadata
     let film;
     try {
       const r = await fetch(`${apiOrigin}/film-data?slug=${slug}`);
       film = await r.json();
       if (film.code) throw film;
-    } catch(e) {
-      console.error(e);
-      return document.getElementById('film-title').innerText = 'Error loading film.';
+    } catch (err) {
+      console.error('film-data error', err);
+      document.getElementById('film-title').innerText = 'Error loading film info.';
+      return;
     }
 
-    // Show title/desc
+    // 2) Render title & description
     document.getElementById('film-title').innerText   = film.title;
     document.getElementById('description').innerHTML = film.description;
 
-    // Rent button
+    // 3) Render Rent button
     const btn = document.createElement('button');
     btn.className = 'rent-now';
-    btn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
-    btn.onclick   = async () => {
-      // Create session
-      let data;
+    btn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
+    btn.onclick   = ()=> startCheckout(slug);
+    document.getElementById('buttons').appendChild(btn);
+
+    // 4) Start checkout and redirect to full session.url
+    async function startCheckout(slug) {
       try {
         const res = await fetch(`${apiOrigin}/checkout`, {
           method:      'POST',
@@ -59,17 +67,57 @@
           headers:     {'Content-Type':'application/json'},
           body:        JSON.stringify({slug})
         });
-        if (!res.ok) throw await res.json();
-        data = await res.json();
-      } catch(err) {
-        console.error(err);
-        return alert('Checkout creation failed; see console.');
+        if (!res.ok) {
+          const e = await res.json().catch(()=>({message:res.statusText}));
+          throw new Error(e.message);
+        }
+        const { url } = await res.json();
+        window.location.href = url;  // full URL including #fragment
+      } catch (err) {
+        console.error('startCheckout error', err);
+        alert('Error starting checkout; see console.');
       }
-      console.log('Stripe sessionId:', data.sessionId);
-      // Redirect to hosted Checkout
-      window.location.href = `https://checkout.stripe.com/pay/${data.sessionId}`;
-    };
-    document.getElementById('buttons').appendChild(btn);
+    }
+
+    // 5) Fetch Bunny token & play video
+    if (session_id) {
+      try {
+        const r = await fetch(`${apiOrigin}/token`, {
+          method:      'POST',
+          credentials: 'include',
+          headers:     {'Content-Type':'application/json'},
+          body:        JSON.stringify({session_id})
+        });
+        if (!r.ok) throw await r.json();
+        const { url } = await r.json();
+        renderPlayer(url);
+      } catch (e) {
+        console.error('token error', e);
+        document.getElementById('player').innerText = 'Unable to load video.';
+      }
+    }
+
+    // 6) HLS.js player
+    function renderPlayer(hlsUrl) {
+      const c = document.getElementById('player');
+      c.innerHTML = '';
+      if (window.Hls && Hls.isSupported()) {
+        const v = document.createElement('video');
+        v.controls = true;
+        v.crossOrigin = 'anonymous';
+        v.style.maxWidth = '100%';
+        c.appendChild(v);
+        const hls = new Hls();
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(v);
+      } else {
+        c.innerHTML = `
+          <video controls crossOrigin="anonymous" style="max-width:100%">
+            <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
+            Your browser doesn’t support HLS.
+          </video>`;
+      }
+    }
   })();
   </script>
 </body>

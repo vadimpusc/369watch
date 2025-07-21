@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
-    body { font-family:sans-serif; max-width:720px; margin:2rem auto; padding:0 1rem; }
-    .btn  { display:inline-block; padding:.75rem 1.5rem; background:#0073aa; color:#fff; text-decoration:none; border-radius:.25rem; }
+    body{font-family:sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem}
+    .btn{display:inline-block;padding:.75rem 1.5rem;background:#0073aa;color:#fff;text-decoration:none;border-radius:.25rem}
   </style>
 </head>
 <body>
@@ -18,79 +18,73 @@
 
   <script>
   (async()=>{
-    const params     = new URLSearchParams(location.search);
-    const slug       = params.get('slug');
-    const session_id = params.get('session_id');
-    const apiOrigin  = 'https://sanrokuku.com/wp-json/film/v1';
-    const wpMovieUrl = `https://sanrokuku.com/movie/${slug}/`;
+    const api       = 'https://sanrokuku.com/wp-json/film/v1';
+    const params    = new URLSearchParams(location.search);
+    const slug      = params.get('slug');
+    const sessionId = params.get('session_id');
 
     if (!slug) {
       document.body.innerText = 'No film specified.';
       return;
     }
 
-    // 1) Fetch the film metadata
+    // 1) Fetch metadata
     let film;
     try {
-      const res = await fetch(`${apiOrigin}/film-data?slug=${slug}`);
+      const res = await fetch(`${api}/film-data?slug=${slug}`);
       film = await res.json();
       if (film.code) throw film;
     } catch {
-      document.getElementById('film-title').innerText = 'Error loading film info.';
+      document.getElementById('film-title').innerText = 'Error loading film.';
       return;
     }
 
-    // 2) Render title & description
+    // 2) Render
     document.getElementById('film-title').innerText   = film.title;
     document.getElementById('description').innerHTML = film.description;
 
-    const buttons = document.getElementById('buttons');
+    const btns = document.getElementById('buttons');
 
-    // 3) If no session_id → this user hasn’t rented yet
-    if (!session_id) {
-      buttons.innerHTML = `
-        <a class="btn" href="${wpMovieUrl}">
+    // 3) Not rented yet?
+    if (!sessionId) {
+      btns.innerHTML = `
+        <a class="btn" href="https://sanrokuku.com/movie/${slug}/">
           → Rent this film on Sanrokuku.com
         </a>`;
       return;
     }
 
-    // 4) Otherwise they’ve returned from Stripe with a session_id
-    //    So fetch the Bunny URL and play it.
+    // 4) Already rented → play it
     try {
-      const r = await fetch(`${apiOrigin}/token`, {
-        method:      'POST',
-        credentials: 'include',
-        headers:     {'Content-Type':'application/json'},
-        body:        JSON.stringify({session_id})
+      const r = await fetch(`${api}/token`, {
+        method: 'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body:    JSON.stringify({ session_id: sessionId })
       });
       if (!r.ok) throw await r.json();
       const { url } = await r.json();
       renderPlayer(url);
-    } catch (err) {
-      console.error(err);
+    } catch (e) {
+      console.error(e);
       document.getElementById('player').innerText = 'Unable to load video.';
     }
 
-    // 5) HLS.js player
+    // 5) HLS.js
     function renderPlayer(hlsUrl) {
-      const container = document.getElementById('player');
-      container.innerHTML = '';
+      const c = document.getElementById('player');
+      c.innerHTML = '';
       if (window.Hls && Hls.isSupported()) {
-        const video = document.createElement('video');
-        video.crossOrigin = 'anonymous';
-        video.controls     = true;
-        video.style.maxWidth = '100%';
-        container.appendChild(video);
+        const v = document.createElement('video');
+        v.crossOrigin='anonymous'; v.controls=true; v.style.maxWidth='100%';
+        c.appendChild(v);
         const hls = new Hls();
         hls.loadSource(hlsUrl);
-        hls.attachMedia(video);
+        hls.attachMedia(v);
       } else {
-        container.innerHTML = `
-          <video controls crossOrigin="anonymous" style="max-width:100%">
-            <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
-            Your browser doesn’t support HLS.
-          </video>`;
+        c.innerHTML = `<video controls crossOrigin="anonymous" style="max-width:100%">
+          <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
+          Your browser doesn’t support HLS.
+        </video>`;
       }
     }
   })();

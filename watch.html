@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>Watch Film</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <!-- ONLY load HLS.js here -->
+  <!-- only load HLS.js -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <style>
     body { font-family:sans-serif; max-width:720px; margin:2rem auto; padding:0 1rem; }
@@ -36,14 +36,14 @@
       return;
     }
 
-    // 1) Fetch film metadata
+    // 1) Fetch metadata
     let film;
     try {
       const r = await fetch(`${apiOrigin}/film-data?slug=${slug}`);
       film = await r.json();
       if (film.code) throw film;
     } catch (err) {
-      console.error('film-data error', err);
+      console.error(err);
       document.getElementById('film-title').innerText = 'Error loading film info.';
       return;
     }
@@ -52,49 +52,49 @@
     document.getElementById('film-title').innerText   = film.title;
     document.getElementById('description').innerHTML = film.description;
 
-    // 3) Render Rent button
+    // 3) Create Rent button
     const btn = document.createElement('button');
     btn.className = 'rent-now';
-    btn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
-    btn.onclick   = ()=> startCheckout(slug);
+    btn.innerText = `Rent $${(film.rent_price/100).toFixed(2)}`;
+    btn.onclick   = () => startCheckout(slug);
     document.getElementById('buttons').appendChild(btn);
 
-    // 4) Native redirect into Stripe Checkout (no Stripe.js here)
+    // 4) Redirect into Stripe Checkout
     async function startCheckout(slug) {
       try {
         const res = await fetch(`${apiOrigin}/checkout`, {
           method:      'POST',
           credentials: 'include',
-          headers:     {'Content-Type':'application/json'},
-          body:        JSON.stringify({slug})
+          headers:     { 'Content-Type':'application/json' },
+          body:        JSON.stringify({ slug })
         });
         if (!res.ok) {
           const e = await res.json().catch(()=>({message:res.statusText}));
           throw new Error(e.message);
         }
         const { sessionId } = await res.json();
-        // **THIS** does the full‑page redirect to Stripe
-        window.location = `https://checkout.stripe.com/pay/${sessionId}`;
+        // **This** triggers the browser to go to the hosted Checkout page
+        window.location.href = `https://checkout.stripe.com/pay/${sessionId}`;
       } catch (err) {
-        console.error('startCheckout error', err);
+        console.error(err);
         alert('Error starting checkout; see console.');
       }
     }
 
-    // 5) After successful payment, load Bunny token & render player
+    // 5) After return, fetch Bunny token & play
     if (session_id) {
       try {
         const r = await fetch(`${apiOrigin}/token`, {
           method:      'POST',
           credentials: 'include',
-          headers:     {'Content-Type':'application/json'},
-          body:        JSON.stringify({session_id})
+          headers:     { 'Content-Type':'application/json' },
+          body:        JSON.stringify({ session_id })
         });
         if (!r.ok) throw await r.json();
         const { url } = await r.json();
         renderPlayer(url);
       } catch (e) {
-        console.error('token error', e);
+        console.error(e);
         document.getElementById('player').innerText = 'Unable to load video.';
       }
     }
@@ -105,16 +105,19 @@
       c.innerHTML = '';
       if (window.Hls && Hls.isSupported()) {
         const v = document.createElement('video');
-        v.controls = true; v.crossOrigin = 'anonymous'; v.style.maxWidth='100%';
+        v.controls = true;
+        v.crossOrigin = 'anonymous';
+        v.style.maxWidth = '100%';
         c.appendChild(v);
         const hls = new Hls();
         hls.loadSource(hlsUrl);
         hls.attachMedia(v);
       } else {
-        c.innerHTML = `<video controls crossOrigin="anonymous" style="max-width:100%">
-          <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
-          Your browser doesn’t support HLS.
-        </video>`;
+        c.innerHTML = `
+          <video controls crossOrigin="anonymous" style="max-width:100%">
+            <source src="${hlsUrl}" type="application/vnd.apple.mpegurl">
+            Your browser doesn’t support HLS.
+          </video>`;
       }
     }
   })();
